@@ -6,6 +6,7 @@ import {
   MetricQueryResponse,
   resolveDatasetId,
 } from '../query/MetricQuery'
+import { appendFipsIfNeeded } from '../utils/datasetutils'
 import VariableProvider from './VariableProvider'
 
 export const GUN_VIOLENCE_DATATYPES: DataTypeId[] = [
@@ -19,6 +20,7 @@ const GUN_HOMICIDE_METRIC_IDS: MetricId[] = [
   'gun_violence_homicide_pct_relative_inequity',
   'gun_violence_homicide_pct_share',
   'gun_violence_homicide_per_100k',
+  'gun_violence_homicide_per_100k_is_suppressed',
 ]
 
 const GUN_SUICIDE_METRIC_IDS: MetricId[] = [
@@ -26,6 +28,7 @@ const GUN_SUICIDE_METRIC_IDS: MetricId[] = [
   'gun_violence_suicide_pct_relative_inequity',
   'gun_violence_suicide_pct_share',
   'gun_violence_suicide_per_100k',
+  'gun_violence_suicide_per_100k_is_suppressed',
 ]
 
 const GUN_DEATHS_METRIC_IDS: MetricId[] = [
@@ -82,11 +85,15 @@ class GunViolenceProvider extends VariableProvider {
         '',
         metricQuery,
       )
+
       if (!datasetId) {
         return new MetricQueryResponse([], [])
       }
 
-      const gunViolenceData = await getDataManager().loadDataset(datasetId)
+      const specificDatasetId = appendFipsIfNeeded(datasetId, breakdowns)
+
+      const gunViolenceData =
+        await getDataManager().loadDataset(specificDatasetId)
       let df = gunViolenceData.toDataFrame()
 
       df = this.filterByGeo(df, breakdowns)

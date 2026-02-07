@@ -15,6 +15,7 @@ from ingestion.constants import (
     HISTORICAL,
     BQ_STRING,
     BQ_FLOAT,
+    BQ_BOOLEAN,
     ALL_VALUE,
 )
 import os
@@ -31,6 +32,7 @@ def melt_to_het_style_df(
     demo_col: Literal["age", "sex", "race", "race_and_ethnicity"],
     keep_cols: List[str],
     value_to_cols: Dict[str, Dict[str, str]],
+    drop_empty_rows: bool = False,
 ):
     """Generalized util fn for melting a source df into the skinny/long
     HET-style df that contains 1 row per FIPS/GROUP (or FIPS/TIME_PERIOD/GROUP)
@@ -49,6 +51,7 @@ def melt_to_het_style_df(
         for the resulting df (typically a metric like "population_pct_share")
         to the col name mapping that is a dict of old_group_metric column names
         to new_group_names
+    drop_empty_rows: whether to drop rows that contain all nulls
 
     Example:
 
@@ -83,6 +86,10 @@ def melt_to_het_style_df(
     # merge all partial_dfs
     merge_cols = [*keep_cols, demo_col]
     result_df = merge_dfs_list(partial_dfs, merge_cols)
+
+    if drop_empty_rows:
+        value_cols = list(value_to_cols.keys())
+        result_df = result_df.dropna(subset=value_cols, how="all")
 
     return result_df.sort_values(by=keep_cols).reset_index(drop=True)
 
@@ -596,7 +603,7 @@ def preserve_most_recent_year_rows_per_topic(df: pd.DataFrame, topic_prefixes: L
     # iterate over the recent_year_to_rate_col_map and extract the most recent year rows data per rate_col
     dfs_by_recent_year: List[pd.DataFrame] = []
     for year, topic_cols in recent_year_to_rate_col_map.items():
-        keep_cols = base_cols + topic_cols
+        keep_cols = list(dict.fromkeys(base_cols + topic_cols))
 
         # get a subset df with the keep_cols and only the rows where time_period == year
         df_for_year = df[df[std_col.TIME_PERIOD_COL] == year][keep_cols]
@@ -800,7 +807,12 @@ def build_bq_col_types(df: pd.DataFrame) -> Dict[str, str]:
     """Returns a dict mapping column names needed by BigQuery to their BQ types."""
     bq_col_types: Dict[str, str] = {}
     for col in df.columns:
-        bq_col_types[col] = BQ_FLOAT if std_col.ends_with_suffix_from_list(col, std_col.SUFFIXES) else BQ_STRING
+        if col.endswith(std_col.IS_SUPPRESSED_SUFFIX):
+            bq_col_types[col] = BQ_BOOLEAN
+        elif std_col.ends_with_suffix_from_list(col, std_col.SUFFIXES):
+            bq_col_types[col] = BQ_FLOAT
+        else:
+            bq_col_types[col] = BQ_STRING
     return bq_col_types
 
 

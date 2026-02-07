@@ -35,6 +35,7 @@ ELIGIBILITY_COL = "eligibility"
 # DEMOGRAPHICS FOR WISQARS
 URBANICITY_COL = "urbanicity"
 
+IS_SUPPRESSED_SUFFIX = "is_suppressed"
 
 STATE_FIPS_COL = "state_fips"
 STATE_NAME_COL = "state_name"
@@ -230,6 +231,8 @@ FATAL_POPULATION = "fatal_population"
 FATAL_POPULATION_PCT = "fatal_population_pct"
 FATAL_PREFIX: WISQARS_VAR_TYPE = "fatal"
 
+# GUN DEATHS
+GUN_DEATHS_PREFIX: WISQARS_VAR_TYPE = "gun_deaths"
 GUN_VIOLENCE_HOMICIDE_PREFIX: WISQARS_VAR_TYPE = "gun_violence_homicide"
 GUN_VIOLENCE_HOMICIDE_RAW = "gun_violence_homicide_estimated_total"
 GUN_VIOLENCE_HOMICIDE_PER_100K = "gun_violence_homicide_per_100k"
