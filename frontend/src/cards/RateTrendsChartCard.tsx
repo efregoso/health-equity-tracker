@@ -30,7 +30,7 @@ import type { Fips } from '../data/utils/Fips'
 import { reportProviderSteps } from '../reports/ReportProviderSteps'
 import type { ScrollableHashId } from '../utils/hooks/useStepObserver'
 import CardWrapper from './CardWrapper'
-import ChartTitle from './ChartTitle'
+import ChartTitle, { getChartTitleId } from './ChartTitle'
 import UnknownPctRateGradient from './UnknownPctRateGradient'
 import AltTableView from './ui/AltTableView'
 import Hiv2020Alert from './ui/Hiv2020Alert'
@@ -135,8 +135,18 @@ export default function RateTrendsChartCard(props: RateTrendsChartCardProps) {
       reportTitle={props.reportTitle}
       expanded={a11yTableExpanded}
       className={props.className}
+      isCompareCard={props.isCompareCard}
+      fips={props.fips}
+      dataTypeConfig={props.dataTypeConfig}
+      demographicType={props.demographicType}
+      selectedGroups={selectedTableGroups}
     >
-      {([queryResponseRates, queryResponsePctShares]) => {
+      {(
+        [queryResponseRates, queryResponsePctShares],
+        _metadata,
+        _geoData,
+        overrideCardHasData,
+      ) => {
         let ratesData = queryResponseRates.getValidRowsForField(
           metricConfigRates.metricId,
         )
@@ -222,14 +232,22 @@ export default function RateTrendsChartCard(props: RateTrendsChartCardProps) {
           xAxisTimeSeriesCadence: metricConfigRates.timeSeriesCadence,
         }
 
+        const shouldShowMissingData =
+          queryResponseRates.shouldShowMissingDataMessage([
+            metricConfigRates.metricId,
+          ]) || nestedRatesData?.length === 0
+
+        overrideCardHasData?.(!shouldShowMissingData)
+
         return (
           <>
-            {queryResponseRates.shouldShowMissingDataMessage([
-              metricConfigRates.metricId,
-            ]) || nestedRatesData?.length === 0 ? (
+            {shouldShowMissingData ? (
               <>
                 {/* Chart Title Missing Data */}
-                <ChartTitle title={'Graph unavailable: ' + getTitleText()} />
+                <ChartTitle
+                  id={getChartTitleId(HASH_ID, props.isCompareCard)}
+                  title={'Graph unavailable: ' + getTitleText()}
+                />
                 <MissingDataAlert
                   dataName={`historical data for ${metricConfigRates.chartTitle}`}
                   demographicTypeString={
@@ -243,6 +261,7 @@ export default function RateTrendsChartCard(props: RateTrendsChartCardProps) {
                 {/* ensure we don't render two of these in compare mode */}
                 {!props.isCompareCard && <UnknownPctRateGradient />}
                 <TrendsChart
+                  chartTitleId={getChartTitleId(HASH_ID, props.isCompareCard)}
                   data={nestedRatesData}
                   chartTitle={getTitleText()}
                   chartSubTitle={subtitle}
