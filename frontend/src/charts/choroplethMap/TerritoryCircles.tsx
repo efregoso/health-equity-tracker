@@ -1,4 +1,4 @@
-import * as d3 from 'd3'
+import { select } from 'd3'
 import { useEffect } from 'react'
 import type {
   MapConfig,
@@ -6,8 +6,9 @@ import type {
 } from '../../data/config/MetricConfigTypes'
 import { TERRITORY_CODES } from '../../data/utils/ConstantsGeography'
 import type { Fips } from '../../data/utils/Fips'
-import { het } from '../../styles/DesignTokens'
+import { colors } from '../../styles/tokens/colors'
 import { getFillColor } from './colorSchemes'
+import { formatMetricValue } from './mapHelpers'
 import {
   createTerritoryFeature,
   extractTerritoryData,
@@ -17,10 +18,7 @@ import {
   createEventHandler,
   createMouseEventOptions,
 } from './mouseEventHandlers'
-import { hideTooltips } from './tooltipUtils'
-import type { DataPoint } from './types'
-
-const { borderColor: BORDER_GREY, white: WHITE } = het
+import type { DataPoint, MapTooltipData } from './types'
 
 const TERRITORIES_CONFIG = {
   radius: 16,
@@ -40,7 +38,8 @@ interface TerritoryCirclesProps {
   colorScale: any
   metricConfig: MetricConfig
   dataMap: Map<string, any>
-  tooltipContainer: any
+  showTooltip: (data: MapTooltipData, x: number, y: number) => void
+  hideTooltip: () => void
   geographyType: string
   isExtremesMode: boolean
   mapConfig: MapConfig
@@ -81,7 +80,7 @@ export default function TerritoryCircles(props: TerritoryCirclesProps) {
 
     const territoryX = (i: number) => territoryStartX + i * territorySpacing
 
-    const svg = d3.select(props.svgRef.current)
+    const svg = select(props.svgRef.current)
     let territoryContainer = svg.select<SVGGElement>('.territory-container')
     if (territoryContainer.empty()) {
       territoryContainer = svg
@@ -91,10 +90,6 @@ export default function TerritoryCircles(props: TerritoryCirclesProps) {
 
     territoryContainer.attr('transform', `translate(0, ${props.mapHeight})`)
     territoryContainer.selectAll('*').remove()
-
-    window.addEventListener('wheel', hideTooltips)
-    window.addEventListener('click', hideTooltips)
-    window.addEventListener('touchmove', hideTooltips)
 
     // Draw territory circles with click handlers
     territoryContainer
@@ -114,22 +109,25 @@ export default function TerritoryCircles(props: TerritoryCirclesProps) {
           isMultiMap: props.isMulti,
         }),
       )
-      .attr('stroke', props.isExtremesMode ? BORDER_GREY : WHITE)
+      .attr('stroke', props.isExtremesMode ? colors.altGray : colors.altWhite)
       .attr('stroke-width', STROKE_WIDTH)
+      .attr('role', 'img')
+      .attr('tabindex', '-1')
+      .attr('aria-label', (d) => {
+        const name =
+          d.fips_name ?? TERRITORY_CODES[d.fips] ?? 'Unknown territory'
+        const mapData = props.dataMap.get(d.fips)
+        if (!mapData || mapData.value == null) {
+          return `${name}: no data available`
+        }
+        const formattedValue = formatMetricValue(
+          mapData.value as number,
+          props.metricConfig,
+        )
+        return `${name} territory: ${formattedValue}`
+      })
       .on('mouseover', (event: any, d) => {
-        hideTooltips()
         createEventHandler('mouseover', mouseEventOptions, (d) =>
-          createTerritoryFeature(d.fips),
-        )(event, d)
-      })
-      .on('pointerdown', (event: any, d) => {
-        hideTooltips()
-        createEventHandler('pointerdown', mouseEventOptions, (d) =>
-          createTerritoryFeature(d.fips),
-        )(event, d)
-      })
-      .on('mousemove', (event: any, d) => {
-        createEventHandler('mousemove', mouseEventOptions, (d) =>
           createTerritoryFeature(d.fips),
         )(event, d)
       })
@@ -139,7 +137,6 @@ export default function TerritoryCircles(props: TerritoryCirclesProps) {
         )(event, d)
       })
       .on('touchstart', (event: any, d) => {
-        hideTooltips()
         createEventHandler('touchstart', mouseEventOptions, (d) =>
           createTerritoryFeature(d.fips),
         )(event, d)
@@ -169,13 +166,6 @@ export default function TerritoryCircles(props: TerritoryCirclesProps) {
       .attr('text-anchor', 'middle')
       .attr('font-size', '12px')
       .text((d) => TERRITORY_CODES[d.fips] || d.fips)
-
-    // Return cleanup function for event listeners
-    return () => {
-      window.removeEventListener('wheel', hideTooltips)
-      window.removeEventListener('click', hideTooltips)
-      window.removeEventListener('touchmove', hideTooltips)
-    }
   }, [
     // Dependencies that should trigger a re-render of territories
     props.svgRef,

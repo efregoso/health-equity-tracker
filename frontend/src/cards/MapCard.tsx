@@ -1,5 +1,6 @@
-import { GridView } from '@mui/icons-material'
-import { useMemo, useState } from 'react'
+import GridView from '@mui/icons-material/GridView'
+import { useAtomValue, useSetAtom } from 'jotai'
+import { useMemo } from 'react'
 import { useLocation } from 'react-router'
 import { createColorScale } from '../charts/choroplethMap/colorSchemes'
 import ChoroplethMap from '../charts/choroplethMap/index'
@@ -14,6 +15,7 @@ import { generateChartTitle, generateSubtitle } from '../charts/utils'
 import type { DatasetId } from '../data/config/DatasetMetadata'
 import { dataSourceMetadataMap } from '../data/config/MetadataMap'
 import type { DataTypeConfig, MetricId } from '../data/config/MetricConfigTypes'
+import { applyGeoOverrides } from '../data/config/MetricConfigUtils'
 import { CAWP_METRICS } from '../data/providers/CawpProvider'
 import { POPULATION, SVI } from '../data/providers/GeoContextProvider'
 import {
@@ -59,21 +61,21 @@ import { useIsBreakpointAndUp } from '../utils/hooks/useIsBreakpointAndUp'
 import { useParamState } from '../utils/hooks/useParamState'
 import type { ScrollableHashId } from '../utils/hooks/useStepObserver'
 import type { MadLibId } from '../utils/MadLibs'
+import { locationAtom, urlParamAtom } from '../utils/sharedSettingsState'
 import {
   ATLANTA_MODE_PARAM_KEY,
   EXTREMES_1_PARAM_KEY,
   EXTREMES_2_PARAM_KEY,
   getDemographicGroupFromGroupParam,
   getGroupParamFromDemographicGroup,
-  getParameter,
   MAP1_GROUP_PARAM,
   MAP2_GROUP_PARAM,
   MULTIPLE_MAPS_1_PARAM_KEY,
   MULTIPLE_MAPS_2_PARAM_KEY,
-  setParameter,
 } from '../utils/urlutils'
 import CardWrapper from './CardWrapper'
-import ChartTitle from './ChartTitle'
+import ChartTitle, { getChartTitleId } from './ChartTitle'
+import CAWPCountyMultiDistrictAlert from './ui/CAWPCountyMultiDistrictAlert'
 import DemographicGroupMenu from './ui/DemographicGroupMenu'
 import { ExtremesListBox } from './ui/ExtremesListBox'
 import GeoContext from './ui/GeoContext'
@@ -135,25 +137,35 @@ function MapCardWithKey(props: MapCardProps) {
     MULTIMAP_PARAM_KEY,
     false,
   )
+  const setLocationAtom = useSetAtom(locationAtom)
   const MAP_GROUP_PARAM = props.isCompareCard
     ? MAP2_GROUP_PARAM
     : MAP1_GROUP_PARAM
 
-  const initialGroupParam: string = getParameter(MAP_GROUP_PARAM, ALL)
-  const initialGroup = getDemographicGroupFromGroupParam(initialGroupParam)
-
-  const [activeDemographicGroup, setActiveDemographicGroup] =
-    useState<DemographicGroup>(initialGroup)
+  // Derived from the URL atom (not useState) so back/forward navigation and
+  // write-site group resets stay in sync without a remount.
+  const groupParam = useAtomValue(urlParamAtom(MAP_GROUP_PARAM))
+  const activeDemographicGroup: DemographicGroup =
+    getDemographicGroupFromGroupParam(groupParam || ALL)
 
   const [isAtlantaMode, setIsAtlantaMode] = useParamState<boolean>(
     ATLANTA_MODE_PARAM_KEY,
     false,
   )
 
+  const resolvedDataTypeConfig = useMemo(
+    () =>
+      applyGeoOverrides(
+        props.dataTypeConfig,
+        props.fips.getChildGeographicBreakdown(),
+      ),
+    [props.dataTypeConfig, props.fips.code],
+  )
+
   const metricConfig =
-    props.dataTypeConfig?.metrics?.per100k ??
-    props.dataTypeConfig?.metrics?.pct_rate ??
-    props.dataTypeConfig?.metrics?.index
+    resolvedDataTypeConfig.metrics?.per100k ??
+    resolvedDataTypeConfig.metrics?.pct_rate ??
+    resolvedDataTypeConfig.metrics?.index
 
   const isMobile = !useIsBreakpointAndUp('sm')
   const isMd = useIsBreakpointAndUp('md')
@@ -219,6 +231,13 @@ function MapCardWithKey(props: MapCardProps) {
   const subPopulationId = metricConfig?.rateDenominatorMetric?.metricId
   if (subPopulationId) initialMetridIds.push(subPopulationId)
 
+  if (
+    props.dataTypeConfig.dataTypeId === 'women_in_us_congress' &&
+    !props.fips.isUsa()
+  ) {
+    initialMetridIds.push('congressional_districts')
+  }
+
   const queries = [
     metricQuery(
       initialMetridIds,
@@ -263,17 +282,24 @@ function MapCardWithKey(props: MapCardProps) {
     undefined,
     isAtlantaMode ? 'metro counties of Atlanta, Georgia' : undefined,
   )
-  let subtitle = generateSubtitle(
-    activeDemographicGroup,
-    demographicType,
-    props.dataTypeConfig,
-  )
+
   const pluralChildFips =
     props.fips.getPluralChildFipsTypeDisplayName() ?? 'places'
-  if (isExtremesMode)
-    subtitle += ` (only ${pluralChildFips} with rate extremes)`
-  const filename = `${title} ${subtitle ? `for ${subtitle}` : ''}`
 
+  function generateMapCardSubtitle() {
+    const base = generateSubtitle(
+      activeDemographicGroup,
+      demographicType,
+      resolvedDataTypeConfig,
+    )
+    return (
+      base +
+      (isExtremesMode ? ` (only ${pluralChildFips} with rate extremes)` : '')
+    )
+  }
+
+  const subtitleForFilename = generateMapCardSubtitle()
+  const filename = `${title} ${subtitleForFilename ? `for ${subtitleForFilename}` : ''}`
   return (
     <CardWrapper
       downloadTitle={filename}
@@ -285,8 +311,12 @@ function MapCardWithKey(props: MapCardProps) {
       expanded={isExtremesMode}
       isCompareCard={props.isCompareCard}
       className={props.className}
+      fips={props.fips}
+      dataTypeConfig={props.dataTypeConfig}
+      demographicType={props.demographicType}
+      activeDemographicGroup={activeDemographicGroup}
     >
-      {(queryResponses, metadata, geoData) => {
+      {(queryResponses, metadata, geoData, overrideCardHasData) => {
         // contains rows for sub-geos (if viewing US, this data will be STATE level)
         const childGeoQueryResponse: MetricQueryResponse = queryResponses[0]
         // contains data rows current level (if viewing US, this data will be US level)
@@ -299,6 +329,7 @@ function MapCardWithKey(props: MapCardProps) {
             (row) => row[metricConfig.metricId],
           ).length > 0
 
+        const subtitle = generateMapCardSubtitle()
         const mapQueryResponse = hasSelfButNotChildGeoData
           ? parentGeoQueryResponse
           : childGeoQueryResponse
@@ -395,7 +426,12 @@ function MapCardWithKey(props: MapCardProps) {
           isAtlantaMode ? atlantaData : parentGeoQueryResponse.data,
           subPopSourceLabel,
           demographicType,
-          props.dataTypeConfig,
+          hasSelfButNotChildGeoData
+            ? applyGeoOverrides(
+                props.dataTypeConfig,
+                props.fips.getGeographicBreakdown(),
+              )
+            : resolvedDataTypeConfig,
         )
 
         const dataForSvi: HetRow[] =
@@ -438,28 +474,25 @@ function MapCardWithKey(props: MapCardProps) {
         const hideGroupDropdown =
           Object.values(filterOptions).toString() === ALL
 
-        // if a previously selected group is no longer valid, reset to ALL
-        let dropdownValue = ALL
-        if (
-          filterOptions[DEMOGRAPHIC_DISPLAY_TYPES[demographicType]].includes(
-            activeDemographicGroup,
-          )
-        ) {
-          dropdownValue = activeDemographicGroup
-        } else {
-          setActiveDemographicGroup(ALL)
-          setParameter(MAP_GROUP_PARAM, ALL)
-        }
+        const dropdownValue = filterOptions[
+          DEMOGRAPHIC_DISPLAY_TYPES[demographicType]
+        ].includes(activeDemographicGroup)
+          ? activeDemographicGroup
+          : ALL
 
         function handleMapGroupClick(_: any, newGroup: DemographicGroup) {
-          setActiveDemographicGroup(newGroup)
           const groupCode = getGroupParamFromDemographicGroup(newGroup)
-          setParameter(MAP_GROUP_PARAM, groupCode)
+          setLocationAtom((prev) => {
+            const next = new URLSearchParams(prev.searchParams)
+            next.set(MAP_GROUP_PARAM, groupCode)
+            return { ...prev, searchParams: next }
+          })
         }
 
-        const displayData = isExtremesMode
-          ? highestValues.concat(lowestValues)
-          : dataForActiveDemographicGroup
+        const displayData =
+          isExtremesMode && dataForActiveDemographicGroup.length > 1
+            ? highestValues.concat(lowestValues)
+            : dataForActiveDemographicGroup
 
         const isPhrmaAdherence =
           PHRMA_METRICS.includes(metricId) && metricConfig.type === 'pct_rate'
@@ -469,13 +502,16 @@ function MapCardWithKey(props: MapCardProps) {
 
         const mapConfig = props.dataTypeConfig.mapConfig
 
-        if (dataForActiveDemographicGroup?.length <= 1) setIsExtremesMode(false)
+        const hasMapData =
+          !!dataForActiveDemographicGroup?.length && !!metricConfig
+        overrideCardHasData?.(hasMapData)
 
-        if (!dataForActiveDemographicGroup?.length || !metricConfig)
+        if (!hasMapData)
           return (
             <>
               <div className='w-full'>
                 <ChartTitle
+                  id={getChartTitleId(HASH_ID, props.isCompareCard)}
                   title={'Rate map unavailable: ' + title}
                   subtitle={subtitle}
                 />
@@ -583,12 +619,12 @@ function MapCardWithKey(props: MapCardProps) {
                   onClick={() => {
                     setMultimapOpen(true)
                   }}
-                  className='flex items-center'
+                  className='flex items-start'
                   ariaLabel={`Launch multiple maps view with side-by-side maps of each ${prettyDemoType} group`}
                 >
-                  <GridView />
-                  <span className='mt-1 px-1'>
-                    View {prettyDemoType} disparties across multiple small maps
+                  <GridView className='mt-0.5 shrink-0' />
+                  <span className='px-1 text-left text-alt-green'>
+                    View small multiples
                   </span>
                 </HetLinkButton>
               </div>
@@ -598,6 +634,7 @@ function MapCardWithKey(props: MapCardProps) {
               <div className='flex flex-wrap'>
                 <div className='w-full'>
                   <ChartTitle
+                    id={getChartTitleId(HASH_ID, props.isCompareCard)}
                     title={title}
                     subtitle={subtitle}
                     filterButton={
@@ -612,16 +649,18 @@ function MapCardWithKey(props: MapCardProps) {
                     }
                   />
                   {isGeorgiaWithCountyData && !isExtremesMode && (
-                    <HetLinkButton
-                      onClick={() => setIsAtlantaMode(!isAtlantaMode)}
-                      className='flex items-center'
-                    >
-                      <span className='mt-1 px-1'>
-                        {isAtlantaMode
-                          ? 'Return to all counties'
-                          : 'Highlight metro Atlanta counties'}
-                      </span>
-                    </HetLinkButton>
+                    <div className='flex justify-center'>
+                      <HetLinkButton
+                        onClick={() => setIsAtlantaMode(!isAtlantaMode)}
+                        className='flex items-center'
+                      >
+                        <span className='mt-1 px-1 text-alt-green'>
+                          {isAtlantaMode
+                            ? 'Return to all counties'
+                            : 'Highlight metro Atlanta counties'}
+                        </span>
+                      </HetLinkButton>
+                    </div>
                   )}
                 </div>
 
@@ -688,6 +727,13 @@ function MapCardWithKey(props: MapCardProps) {
                     sviQueryResponse={sviQueryResponse}
                     isAtlantaMode={isAtlantaMode}
                   />
+                  {props.dataTypeConfig.dataTypeId === 'women_in_us_congress' &&
+                    props.fips.isCounty() && (
+                      <CAWPCountyMultiDistrictAlert
+                        queryResponse={mapQueryResponse}
+                        demographicType={demographicType}
+                      />
+                    )}
                 </div>
               </div>
               <div
@@ -716,6 +762,7 @@ function MapCardWithKey(props: MapCardProps) {
                       activeDemographicGroup={activeDemographicGroup}
                     />
                   )}
+
                 {percentRateTooHigh && (
                   <HetNotice
                     title='Percentages Over 100%'
