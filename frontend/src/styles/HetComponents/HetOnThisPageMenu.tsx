@@ -1,5 +1,4 @@
 import { useEffect, useState } from 'react'
-import { Events } from 'react-scroll'
 import HetReturnToTopFloating from '../../pages/Policy/policyComponents/HetReturnToTopFloating'
 import type { RouteConfig } from '../../pages/sharedTypes'
 import { useScrollToAnchor } from '../../utils/hooks/useScrollToAnchor'
@@ -39,25 +38,14 @@ export default function HetOnThisPageMenu(props: HetOnThisPageMenuProps) {
   const [activeLink, setActiveLink] = useState<string | null>(null)
   const scrollToAnchor = useScrollToAnchor()
 
+  // TODO: Re-implement passive scroll-spy. activeLink currently only updates on explicit click;
+  // the prior scroll-end event listener was removed as dead code, but the use case (highlight
+  // current section during scroll) remains valid and should be restored via IntersectionObserver.
+
   useEffect(() => {
     const storedActiveLink = sessionStorage.getItem('activeLink')
     if (storedActiveLink) {
       setActiveLink(storedActiveLink)
-    }
-
-    Events.scrollEvent.register('end', () => {
-      const activeLinkElement = document.querySelector('.active')
-      if (activeLinkElement) {
-        const newActiveLink = activeLinkElement.getAttribute('to')
-        if (newActiveLink) {
-          setActiveLink(newActiveLink)
-          sessionStorage.setItem('activeLink', newActiveLink)
-        }
-      }
-    })
-
-    return () => {
-      Events.scrollEvent.remove('end')
     }
   }, [])
 
